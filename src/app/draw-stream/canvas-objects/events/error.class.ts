@@ -1,6 +1,6 @@
-import { EventGraphicObject } from './event';
+import { EventCanvasObject } from './event-object';
 
-export class ErrorEventGraphicObject implements EventGraphicObject {
+export class ErrorEvent implements EventCanvasObject {
   constructor(
     public context: CanvasRenderingContext2D,
     public x: number,
@@ -9,7 +9,7 @@ export class ErrorEventGraphicObject implements EventGraphicObject {
     public color: string = 'black'
   ) {}
 
-  render(): EventGraphicObject {
+  render(): EventCanvasObject {
     this.context.beginPath();
     this.context.moveTo(this.x - this.size / 2, this.y);
     this.context.lineTo(this.x + this.size / 2, this.y + this.size);

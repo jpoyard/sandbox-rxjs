@@ -1,7 +1,7 @@
-export interface EventGraphicObject {
+export interface CanvasObject {
   context: CanvasRenderingContext2D;
   x: number;
   y: number;
   color: string;
-  render: () => EventGraphicObject;
+  render: () => CanvasObject;
 }

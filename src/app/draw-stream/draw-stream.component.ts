@@ -4,14 +4,13 @@ import {
   ViewChild,
   ElementRef,
   AfterViewInit,
-  NgZone,
-  ChangeDetectionStrategy
+  NgZone
 } from '@angular/core';
-import {
-  EndEventGraphicObject,
-  ErrorEventGraphicObject,
-  NextEventGraphicObject
-} from './events';
+
+import { Observable } from 'rxjs';
+import { tap, share, filter, count, takeWhile } from 'rxjs/operators';
+
+import { StreamObject } from './canvas-objects';
 
 @Component({
   selector: 'app-draw-stream',
@@ -21,30 +20,37 @@ import {
   styles: [
     `
       :host {
-        height: 50px;
         position: absolute;
         left: 0;
         right: 0;
+        top: 0;
+        bottom: 0;
       }
     `
   ]
 })
 export class DrawStreamComponent implements AfterViewInit, OnInit {
-  private intervalID: any;
-
   @ViewChild('streamAnimation') canvasStreamAnimation: ElementRef;
   public raf;
   public canvas: HTMLCanvasElement;
   public context: CanvasRenderingContext2D;
-  public events = [];
-  public vx = 1;
 
   public objectSize: number;
   public lineWidth: number;
 
+  public observable = Observable.create(observer => {
+    const values = ['blue', 'yellow', 'red', 'green', 'brown', 'yellow'];
+    values.forEach((color, index) => {
+      setTimeout(() => observer.next({ value: index, color }), index * 1000);
+    });
+    setTimeout(() => observer.complete(), values.length * 1000);
+  }); // .pipe(share());
+
   constructor(public eltRef: ElementRef, public ngZone: NgZone) {}
 
   ngOnInit() {}
+
+  streamObjs: StreamObject[];
 
   ngAfterViewInit(): void {
     this.canvas = this.canvasStreamAnimation.nativeElement as HTMLCanvasElement;
@@ -52,117 +58,65 @@ export class DrawStreamComponent implements AfterViewInit, OnInit {
     this.canvas.height = this.eltRef.nativeElement.offsetHeight;
     this.context = this.canvas.getContext('2d');
 
-    this.objectSize = this.canvas.height / 4;
+    this.objectSize = this.canvas.height / 40;
     this.lineWidth = 2;
 
-    /** tmp */
+    const observables = [
+      this.observable,
+      this.observable.pipe(
+        filter((data: { color: string }) => data.color === 'yellow')
+      ),
+      this.observable.pipe(
+        count((data: { color: string }) => data.color === 'yellow')
+      ),
+      this.observable.pipe(
+        takeWhile((data: { color: string }) => data.color !== 'brown')
+      )
+    ];
 
-    this.canvas.addEventListener('mouseover', e => {
-      this.intervalID = setInterval(() => {
-        this.addEvent({ type: 'next' });
-      }, 1000);
-      this.render();
+    const size = observables.length;
+    const interval = this.canvas.height / (size + 1);
+
+    this.streamObjs = Array.from(Array(size).keys()).map(
+      index =>
+        new StreamObject(
+          this.context,
+          0,
+          interval * (index + 1),
+          this.canvas.width,
+          this.objectSize,
+          this.lineWidth,
+          'black'
+        ).render() as StreamObject
+    );
+
+    this.canvas.addEventListener('mouseenter', e => {
+      observables.forEach((observable, index) => {
+        observable.subscribe(this.streamObjs[index]);
+      });
+    });
+
+    // Wait next tick
+    this.ngZone.runOutsideAngular(() => {
+      this.raf = window.requestAnimationFrame(this.render.bind(this));
     });
 
     this.canvas.addEventListener('mouseout', e => {
-      clearInterval(this.intervalID);
       this.ngZone.runOutsideAngular(() => {
         window.cancelAnimationFrame(this.raf);
       });
     });
-
-    this.canvas.addEventListener('click', e => {
-      this.addEvent({ type: 'next' });
-    });
-    /** tmp */
   }
 
-  public render(): void {
+  render(): void {
+    // Clean canvas
     this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Draw line
-    this.context.beginPath();
-    this.context.moveTo(0, this.canvas.height / 2);
-    this.context.lineTo(this.canvas.width, this.canvas.height / 2);
-    this.context.closePath();
-    this.context.strokeStyle = 'black';
-    this.context.lineWidth = this.lineWidth;
-    this.context.stroke();
-
-    // Draw events
-    this.events = this.events.filter(event => {
-      event.x -= this.vx;
-      event.render();
-      return !(event.x + event.size < 0);
-    });
-
-    // Draw arrow
-    this.context.beginPath();
-    this.context.moveTo(this.canvas.width, this.canvas.height / 2);
-    this.context.lineTo(
-      this.canvas.width - this.objectSize,
-      this.canvas.height / 2 + this.objectSize
-    );
-    this.context.lineTo(
-      this.canvas.width - this.objectSize,
-      this.canvas.height / 2 - this.objectSize
-    );
-    this.context.closePath();
-    this.context.fillStyle = 'black';
-    this.context.fill();
+    this.streamObjs.forEach(streamObj => streamObj.render());
 
     // Wait next tick
-    if (this.events.length > 0) {
-      this.ngZone.runOutsideAngular(() => {
-        this.raf = window.requestAnimationFrame(this.render.bind(this));
-      });
-    }
-  }
-
-  public addEvent({
-    type,
-    color = 'blue'
-  }: {
-    type: 'next' | 'error' | 'end';
-    color?: string;
-  }) {
-    // TODO: static position
-    const x = this.canvas.width + this.objectSize;
-    const y = this.canvas.height / 2;
-
-    switch (type) {
-      case 'next':
-        this.events.push(
-          new NextEventGraphicObject(
-            this.context,
-            x,
-            this.canvas.height / 2,
-            this.objectSize,
-            color
-          ).render()
-        );
-        break;
-      case 'end':
-        this.events.push(
-          new EndEventGraphicObject(
-            this.context,
-            x,
-            y + this.objectSize / 2,
-            this.lineWidth,
-            this.objectSize
-          ).render()
-        );
-        break;
-      case 'error':
-        this.events.push(
-          new ErrorEventGraphicObject(
-            this.context,
-            x,
-            y + this.objectSize / 2,
-            this.objectSize
-          ).render()
-        );
-        break;
-    }
+    this.ngZone.runOutsideAngular(() => {
+      this.raf = window.requestAnimationFrame(this.render.bind(this));
+    });
   }
 }
